@@ -5,7 +5,7 @@ Publish a distribution
 3. Build & test:             npm run build && ./dist/mkweb -h
 4. Commit:                   git tag "v$(node -p 'require("./package.json").version')"
 5. Publish on NPM:           npm publish
-6. Push to remote:           git push --tags
+6. Push to remote:           git push --tags origin main
 
 Useful things:
 - Check what version is the latest on NPM:
