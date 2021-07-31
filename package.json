@@ -1,0 +1,41 @@
+{
+  "name": "mkweb",
+  "version": "1.0.0",
+  "description": "Build simple static websites authored in Markdown",
+  "main": "mkweb.js",
+  "bin": {
+    "mkweb": "dist/mkweb"
+  },
+  "files": [
+    "LICENSE.txt",
+    "README.md",
+    "dist/mkweb",
+    "mkweb.js",
+    ".gitignore"
+  ],
+  "scripts": {
+    "build": "mkdir -p dist && esbuild --minify --bundle mkweb.js --platform=node --target=node14 --outfile=dist/mkweb && chmod +x dist/mkweb",
+    "build-dev": "mkdir -p dist && touch dist/mkweb-dev && chmod +x dist/mkweb-dev && esbuild --watch --bundle mkweb.js --platform=node --target=node14 --outfile=dist/mkweb-dev --external:autoprefixer --external:cssnano"
+  },
+  "author": "Rasmus Andersson <rsms.me>",
+  "license": "ISC",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rsms/mkweb.git"
+  },
+  "engines": {
+    "node": ">=14.0.0"
+  },
+  "devDependencies": {
+    "autoprefixer": "^10.2.6",
+    "cssnano": "^5.0.6",
+    "esbuild": "^0.12.14",
+    "highlight.js": "^11.0.1",
+    "markdown-wasm": "^1.2.0",
+    "miniglob": "^0.1.2",
+    "postcss": "^8.3.5",
+    "postcss-import": "^14.0.2",
+    "postcss-nested": "^5.0.5",
+    "serve-http": "^1.0.6"
+  }
+}
