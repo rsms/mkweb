@@ -36,84 +36,93 @@ function die(msg) {
 }
 
 
-function create_site_object() {
-  return {
-    srcdir: ".",
-    outdir: "_site",
-    pages: [],
-    defaultTemplate: "template.html",
-    buildHash: Date.now().toString(36),
-    fileTypes: { // lower(filename_ext) => type
-      ".md": "md",
-      ".mdown": "md",
-      ".markdown": "md",
-      ".html": "html",
-      ".htm": "html",
-      ".css": "css",
-    },
-    fileKinds: { // type => KIND_*
-      "md": KIND_PAGE,
-      "html": KIND_PAGE,
-      "css": KIND_CSS,
-    },
-    pageRenderers: { // keyed on fileTypes
-      "md": render_page_md,
-      "html": render_page_html,
-    },
+function create_site_object() { return {
+  srcdir: ".",
+  outdir: "_site",
+  pages: [],
+  defaultTemplate: "template.html",
+  buildHash: Date.now().toString(36),
+  fileTypes: { // lower(filename_ext) => type
+    ".md": "md",
+    ".mdown": "md",
+    ".markdown": "md",
+    ".html": "html",
+    ".htm": "html",
+    ".css": "css",
+  },
+  fileKinds: { // type => KIND_*
+    "md": KIND_PAGE,
+    "html": KIND_PAGE,
+    "css": KIND_CSS,
+  },
+  pageRenderers: { // keyed on fileTypes
+    "md": render_page_md,
+    "html": render_page_html,
+  },
 
-    // templateHelpers are things available in template's global scope.
-    // A helper that is a function is called with the current page scope as "this".
-    // File-based helpers should treat relative paths as relative to the current page.
-    templateHelpers: {
-      // html_encode(text :string) :string
-      html_encode,
-      // mtime(path :string) :number  -- returns 0 on failure
-      mtime,
-      // readfile(path :string, encoding :string = "utf8") :string
-      readfile(path, encoding) {
-        path = Path.resolve(Path.dirname(this.page.srcfile), path)
-        return fs.readFileSync(path, {encoding: encoding === undefined ? "utf8" : encoding})
-      },
-      // include(path :string, encoding :string = "utf8") :string
-      include(path, encoding) {
-        return this.readfile(path, encoding)
-      },
-      // cacheBustFileURL(filename :string) :string -- e.g. "foo.css" -> "foo.css?g0zr0dbgtw"
-      cacheBustFileURL(path) {
-        const filename = Path.join(Path.dirname(this.page.srcfile), path)
-        const mtime = mtime_with_deps(this.site, filename)
-        return path + "?" + Math.round(mtime).toString(36)
-      },
-      // renderMarkdown(src :string|ArrayLike<number>) :string -- returns html
-      // Example: {{! renderMarkdown(readfile("README.md", null)) }}
-      renderMarkdown: render_markdown,
-      url(destination) {
-        let dstpath = ""
-        if (typeof destination == "object" && destination.srcfile) {
-          // page object
-          dstpath = destination.srcfile
-          if (destination.srctype == "md") {
-            dstpath = dstpath.substr(0, dstpath.lastIndexOf(".")) + ".html"
-          }
-        } else {
-          dstpath = Path.resolve(this.site.srcdir, destination)
+  // ignoreFilter returns true for files that should be excluded from output.
+  // name is the base of the file (no directory), path is the absolute filename.
+  ignoreFilter(name, path) {
+    return name[0] == "."
+        || name[0] == "_"
+        || name == "node_modules"
+        || name == "package.json"
+        || name == "package-lock.json"
+        || name == "CNAME"
+  },
+
+  // templateHelpers are things available in template's global scope.
+  // A helper that is a function is called with the current page scope as "this".
+  // File-based helpers should treat relative paths as relative to the current page.
+  templateHelpers: {
+    // html_encode(text :string) :string
+    html_encode,
+    // mtime(path :string) :number  -- returns 0 on failure
+    mtime,
+    // readfile(path :string, encoding :string = "utf8") :string
+    readfile(path, encoding) {
+      path = Path.resolve(Path.dirname(this.page.srcfile), path)
+      return fs.readFileSync(path, {encoding: encoding === undefined ? "utf8" : encoding})
+    },
+    // include(path :string, encoding :string = "utf8") :string
+    include(path, encoding) {
+      return this.readfile(path, encoding)
+    },
+    // cacheBustFileURL(filename :string) :string -- e.g. "foo.css" -> "foo.css?g0zr0dbgtw"
+    cacheBustFileURL(path) {
+      const filename = Path.join(Path.dirname(this.page.srcfile), path)
+      const mtime = mtime_with_deps(this.site, filename)
+      return path + "?" + Math.round(mtime).toString(36)
+    },
+    // renderMarkdown(src :string|ArrayLike<number>) :string -- returns html
+    // Example: {{! renderMarkdown(readfile("README.md", null)) }}
+    renderMarkdown: render_markdown,
+    url(destination) {
+      let dstpath = ""
+      if (typeof destination == "object" && destination.srcfile) {
+        // page object
+        dstpath = destination.srcfile
+        if (destination.srctype == "md") {
+          dstpath = dstpath.substr(0, dstpath.lastIndexOf(".")) + ".html"
         }
-        dstpath = Path.relative(Path.dirname(this.page.srcfile), dstpath)
-        return dstpath
-      },
-      basename: Path.basename,
-      dirname: Path.dirname,
+      } else {
+        dstpath = Path.resolve(this.site.srcdir, destination)
+      }
+      dstpath = Path.relative(Path.dirname(this.page.srcfile), dstpath)
+      return dstpath
+    },
+    basename: Path.basename,
+    dirname: Path.dirname,
 
-      // print(...args :any[]) -- write to template output buffer
-      print(...args) {} // implemented in render_template
+    // print(...args :any[]) -- write to template output buffer
+    print(...args) {} // implemented in render_template
 
-    }, // END templateHelpers
+  }, // END templateHelpers
 
-    // internal state
-    [ERRCOUNT]: 0,
-    [DEPS]: new Map(), // dependency mappings, used in watch mode
-  }
-}
+  // internal state
+  [ERRCOUNT]: 0,
+  [DEPS]: new Map(), // dependency mappings, used in watch mode
+}}
 
 
 async function main(argv) {
@@ -288,7 +297,7 @@ async function build_site(site) {
     }
   }
   const datafiles = await find_files(site.srcdir, ent => {
-    if (ent.name[0] == "." || ent.name[0] == "_" || ent.name == "node_modules")
+    if (site.ignoreFilter(ent.name, ent.path))
       return false
     if (ent.path == site.defaultTemplate || ent.path == site.outdir)
       return false
