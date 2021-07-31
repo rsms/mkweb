@@ -15,7 +15,8 @@ Features:
 Usage:
 
 1. make a directory and put some html, css and/or md files in there
-2. run mkweb in that directory
-3. your website can be found in `_site`
+2. install mkweb from NPM: `npm i rsms-mkweb`
+3. run mkweb in that directory: `./node_modules/.bin/mkweb`
+4. your website can be found in `_site`
 
 See `mkweb -h` for customization options and extra features
