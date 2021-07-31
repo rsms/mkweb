@@ -20,3 +20,10 @@ Usage:
 4. your website can be found in `_site`
 
 See `mkweb -h` for customization options and extra features
+
+
+TODO:
+
+- Some way to configure & customize it
+- Ignoring files (maybe from .gitignore + custom list)
+
