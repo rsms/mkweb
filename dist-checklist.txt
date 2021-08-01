@@ -10,4 +10,4 @@ Publish a distribution
 
 Useful things:
 - Check what version is the latest on NPM:
-  npm show @rsms/mkweb version
+  npm show rsms-mkweb version
