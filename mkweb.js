@@ -63,8 +63,8 @@ function create_site_object() { return {
   // ignoreFilter returns true for files that should be excluded from output.
   // name is the base of the file (no directory), path is the absolute filename.
   ignoreFilter(name, path) {
-    return name[0] == "."
-        || name[0] == "_"
+    return path.includes("/.")
+        || path.includes("/_")
         || name == "node_modules"
         || name == "package.json"
         || name == "package-lock.json"
@@ -271,10 +271,14 @@ function watch_serve_and_rebuild(site, bindaddr) {
   const fswatcher = fs.watch(site.srcdir, { recursive: true }, (event, filename) => {
     // ignore changes in outdir
     if (!filename.startsWith(outdir_rel)) {
-      // wait a bit in case many files changed
-      log(event, filename)
-      clearTimeout(rebuild_timer)
-      rebuild_timer = setTimeout(() => build_site(site), 50)
+      const name = Path.basename(filename)
+      const path = Path.resolve(site.srcdir, filename)
+      if (!site.ignoreFilter(name, path)) {
+        // wait a bit in case many files changed
+        log(event, filename)
+        clearTimeout(rebuild_timer)
+        rebuild_timer = setTimeout(() => build_site(site), 50)
+      }
     }
   })
   log_important(`watching ${nicepath(site.srcdir)} and serving site at http://${host}:${port}/`)
