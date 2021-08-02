@@ -68,7 +68,6 @@ function create_site_object() { return {
         || name == "node_modules"
         || name == "package.json"
         || name == "package-lock.json"
-        || name == "CNAME"
   },
 
   // templateHelpers are things available in template's global scope.
@@ -425,11 +424,8 @@ function html_to_plain_text(html) {
 
 function render_page_md(site, page) {
   let mdsrc = page.srcbuf
-  if (mdsrc.indexOf("{{") != -1) {
-    console.log("------------------")
+  if (mdsrc.indexOf("{{") != -1)
     mdsrc = render_template(site, page, mdsrc.toString("utf8"), {filename: page.srcfile})
-    console.log("——————————————————")
-  }
   return render_markdown(mdsrc)
 }
 
