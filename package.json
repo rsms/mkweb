@@ -1,6 +1,6 @@
 {
   "name": "rsms-mkweb",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "Build simple static websites authored in Markdown",
   "main": "mkweb.js",
   "bin": {
@@ -28,7 +28,7 @@
     "node": ">=14.0.0"
   },
   "dependencies": {
-    "autoprefixer": "^10.2.6",
+    "autoprefixer": "^10.3.6",
     "cssnano": "^5.0.6"
   },
   "devDependencies": {
