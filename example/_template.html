@@ -1,0 +1,15 @@
+<!DOCTYPE HTML>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>{{ page.title || site.title }}</title>
+  <link rel="stylesheet" type="text/css" href="{{
+    cacheBustFileURL(site.baseURL + 'style.css') }}">
+</head>
+<body>
+  <header>
+    <a href="{{site.baseURL}}">{{site.title}}</a>
+  </header>
+{{! page.body }}
+</body>
+</html>
