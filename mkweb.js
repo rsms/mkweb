@@ -353,7 +353,10 @@ function watch_serve_and_rebuild(site, bindaddr) {
     if (!filename.startsWith(outdir_rel)) {
       const name = basename(filename)
       const path = pathresolve(site.srcdir, filename)
-      if (include_srcfile(site, name, path)) {
+      if (include_srcfile(site, name, path) ||
+          site[DEPFILES].has(abspath) ||
+          template_cache.has(abspath))
+      {
         // wait a bit in case many files changed
         log(event, filename)
         clearTimeout(rebuild_timer)
@@ -367,8 +370,6 @@ function watch_serve_and_rebuild(site, bindaddr) {
 
 
 function include_srcfile(site, basename, abspath) {
-  if (site[DEPFILES].has(abspath) || template_cache.has(abspath))
-    return true
   abspath = abspath.substr(site.srcdir.length).toLowerCase()
   return !site.ignoreFilter(basename.toLowerCase(), abspath)
 }
