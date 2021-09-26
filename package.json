@@ -1,6 +1,6 @@
 {
   "name": "rsms-mkweb",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Build simple static websites authored in Markdown",
   "main": "mkweb.js",
   "bin": {
@@ -14,7 +14,7 @@
     ".gitignore"
   ],
   "scripts": {
-    "build": "mkdir -p dist && esbuild --minify-whitespace --minify-syntax --bundle mkweb.js --platform=node --target=node14 --outfile=dist/mkweb --sourcemap=inline --sources-content=false --external:autoprefixer --external:cssnano && chmod +x dist/mkweb",
+    "build": "mkdir -p dist && esbuild --minify --bundle mkweb.js --platform=node --target=node14 --outfile=dist/mkweb --sourcemap=inline --sources-content=false --external:autoprefixer --external:cssnano && chmod +x dist/mkweb",
     "build-dev": "mkdir -p dist && touch dist/mkweb-dev && chmod +x dist/mkweb-dev && esbuild --watch --bundle mkweb.js --platform=node --target=node14 --outfile=dist/mkweb-dev --sourcemap=inline --sources-content=false --external:autoprefixer --external:cssnano",
     "test": "npm run build && ./dist/mkweb example"
   },
