@@ -1,6 +1,6 @@
 {
   "name": "rsms-mkweb",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "Build simple static websites authored in Markdown",
   "main": "mkweb.js",
   "bin": {
@@ -33,7 +33,7 @@
   },
   "devDependencies": {
     "esbuild": "^0.13.2",
-    "highlight.js": "^11.0.1",
+    "highlight.js": "^11.2.0",
     "markdown-wasm": "^1.2.0",
     "miniglob": "^0.1.2",
     "postcss": "^8.3.5",
