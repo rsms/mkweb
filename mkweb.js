@@ -26,9 +26,10 @@ let VERBOSE = false
 let OPTIMIZE = false
 let DEPS = Symbol("DEPS")
 let DEPFILES = Symbol("DEPFILES")
+let DYNFILES = Symbol("DYNFILES")
+let CFGFILE = Symbol("CFGFILE")
 let ERRCOUNT = Symbol("ERRCOUNT")
 let BODY_LINE_OFFSET = Symbol("")
-let DYNAMIC_FILES = Symbol("")
 
 const KIND_PAGE = "page"
 const KIND_CSS  = "css"
@@ -54,7 +55,7 @@ function create_site_object() { return {
   outdir: "_site",
   pages: [],
   root: null, // root "index" page
-  defaultTemplate: "_template.html",
+  defaultTemplate: "",
   baseURL: "/",
   buildHash: Date.now().toString(36),
   fileTypes: { // lower(filename_ext) => type
@@ -76,11 +77,13 @@ function create_site_object() { return {
   },
 
   // ignoreFilter returns true for files that should be excluded from output.
-  // name is the base of the file (no directory), path is the absolute filename.
+  // name is the base of the file (no directory), path is "absolute" as if the
+  // file system is rooted in site.srcdir. Both name and path is toLowerCase().
   ignoreFilter(name, path) {
     return path.includes("/.")
-        || path.includes("/_")
-        || name == "node_modules"
+        || path.startsWith("/_")
+        || path == "/node_modules"
+        || path == "/readme.md"
         || name == "package.json"
         || name == "package-lock.json"
   },
@@ -143,7 +146,7 @@ function create_site_object() { return {
   [ERRCOUNT]: 0,
   [DEPS]: new Map(),          // dependency mappings, used in watch mode
   [DEPFILES]: new Set(),      // values of DEPS
-  [DYNAMIC_FILES]: new Map(), // used in watch mode
+  [DYNFILES]: new Map(), // used in watch mode
 }}
 
 
@@ -178,22 +181,12 @@ async function main(argv) {
   mtime(site.srcdir) > 0 || die(`srcdir "${site.srcdir}" not found`)
   site.srcdir != site.outdir || die(`srcdir is same as outdir ("${site.srcdir}")`)
   site.srcdir.startsWith(site.outdir) && die(`srcdir is inside outdir ("${site.srcdir}")`)
-  site.defaultTemplate = pathresolve(site.srcdir, site.defaultTemplate)
 
-  // config file
-  if (opt.config) {
-    if (!isfile(opt.config))
-      die(`config file ${opt.config} not found`)
-    const f = require(pathresolve(opt.config))
-    if (typeof f != "function")
-      die(`JS config does not export a function (found ${typeof f})`)
-    f({
-      site,
-      hljs,
-      markdown: md,
-      glob,
-    })
-  }
+  // load config from file
+  load_config(site, opt)
+
+  // default template
+  configure_default_template(site)
 
   // check
   if (!site.baseURL || !site.baseURL.endsWith("/"))
@@ -217,6 +210,51 @@ async function main(argv) {
     return watch_serve_and_rebuild(site, opt.http)
 
   return site[ERRCOUNT] > 0 ? 1 : 0
+}
+
+
+function configure_default_template(site, opt) {
+  let file = site.defaultTemplate
+  if (file) {
+    file = pathresolve(site.srcdir, file)
+    if (!isfile(file))
+      die(`default template file ${site.defaultTemplate} not found`)
+  } else {
+    file = pathjoin(site.srcdir, "_template.html")
+    if (!isfile(file))
+      return
+  }
+  site.defaultTemplate = file
+  log(`using default template ${nicepath(file)}`)
+}
+
+
+function load_config(site, opt) {
+  let file = opt.config
+  if (file) {
+    file = pathresolve(file)
+    if (!isfile(file))
+      die(`config file ${opt.config} not found`)
+  } else {
+    file = pathjoin(site.srcdir, "_config.js")
+    if (!isfile(file))
+      return
+  }
+
+  log(`loading config file ${nicepath(file)}`)
+  site[CFGFILE] = file
+
+  const f = require(file)
+
+  if (typeof f != "function")
+    die(`${nicepath(opt.config)} does not export a function (found ${typeof f})`)
+
+  f({
+    site,
+    hljs,
+    markdown: md,
+    glob,
+  })
 }
 
 
@@ -315,10 +353,7 @@ function watch_serve_and_rebuild(site, bindaddr) {
     if (!filename.startsWith(outdir_rel)) {
       const name = basename(filename)
       const path = pathresolve(site.srcdir, filename)
-      if (!site.ignoreFilter(name, path) ||
-          site[DEPFILES].has(path) ||
-          template_cache.has(path) )
-      {
+      if (include_srcfile(site, name, path)) {
         // wait a bit in case many files changed
         log(event, filename)
         clearTimeout(rebuild_timer)
@@ -331,11 +366,21 @@ function watch_serve_and_rebuild(site, bindaddr) {
 }
 
 
+function include_srcfile(site, basename, abspath) {
+  if (site[DEPFILES].has(abspath) || template_cache.has(abspath))
+    return true
+  abspath = abspath.substr(site.srcdir.length).toLowerCase()
+  return !site.ignoreFilter(basename.toLowerCase(), abspath)
+}
+
+
 async function build_site(site) {
   console.time("build site")
   // clear templates cache on each rebuild in case any changed
   template_cache.clear()
   site[DEPFILES] = new Set()
+  if (site[CFGFILE])
+    site[DEPFILES].add(site[CFGFILE])
 
   // find source files
   const specialFiles = {} // keyed by KIND_*
@@ -347,7 +392,7 @@ async function build_site(site) {
     }
   }
   const dataFiles = await find_files(site.srcdir, ent => {
-    if (site.ignoreFilter(ent.name, ent.path))
+    if (!include_srcfile(site, ent.name, ent.path))
       return false
     if (ent.path == site.defaultTemplate || ent.path == site.outdir)
       return false
@@ -552,7 +597,7 @@ async function gen_page(site, page) {
   const outfile = outfilename(site, page.srcfile, ".html")
 
   // skip generating outfile if it's up to date
-  const isDynamic = site[DYNAMIC_FILES].has(page.srcfile)
+  const isDynamic = site[DYNFILES].has(page.srcfile)
   if (!isDynamic) {
     const outfilemtime = mtime(outfile)
     if (page.srcmtime < outfilemtime && self_mtime < outfilemtime) {
@@ -566,7 +611,7 @@ async function gen_page(site, page) {
   }
 
   // reset
-  site[DYNAMIC_FILES].set(page.srcfile, false)
+  site[DYNFILES].set(page.srcfile, false)
 
   // render HTML
   const renderer = site.pageRenderers[page.srctype]
@@ -686,7 +731,7 @@ function render_template(site, page, source, params) {
     return params.escape(value)
   })
 
-  site[DYNAMIC_FILES].set(page.srcfile, isDynamic)
+  site[DYNFILES].set(page.srcfile, isDynamic)
 
   return output
 }
