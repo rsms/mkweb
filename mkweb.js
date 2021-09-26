@@ -49,12 +49,12 @@ function die(msg) {
 
 
 function create_site_object() { return {
+  __proto__: { title: "", },
   srcdir: ".",
   outdir: "_site",
   pages: [],
   root: null, // root "index" page
   defaultTemplate: "_template.html",
-  title: "",
   baseURL: "/",
   buildHash: Date.now().toString(36),
   fileTypes: { // lower(filename_ext) => type
@@ -372,7 +372,7 @@ async function build_site(site) {
 
   // set default site title
   if (!site.title)
-    site.title = basename(site.srcdir)
+    site.__proto__.title = basename(site.srcdir)
 
   if (site.onBeforeBuild) {
     const p = site.onBeforeBuild({dataFiles, specialFiles})
@@ -397,29 +397,23 @@ function connect_pages(site) {
   if (site.pages.length == 0)
     return
 
-  // sort on srcfile where "index" basename takes precedence
   site.pages.sort((a, b) => {
-    const adir = dirname(a.srcfile)
-    const bdir = dirname(b.srcfile)
-    if (adir != bdir)
-      return adir < bdir ? -1 : 1
-    // "index" takes precedence
-    const aname = path_without_ext(a.srcfile.substr(adir.length + 1))
-    const bname = path_without_ext(b.srcfile.substr(adir.length + 1))
-    return (
-      aname == "index" ? -1 : bname == "index" ? 1 :
-      aname < bname ? -1 : 1
-    )
+    const aurl = path_without_ext(a.url).replace(/\/+$/, "")
+    const burl = path_without_ext(b.url).replace(/\/+$/, "")
+    return aurl < burl ? -1 : burl < aurl ? 1 : 0
   })
 
   let parent = null
   let parentStack = []
   let pdir = ""
 
-  if (path_without_ext(basename(site.pages[0].srcfile)).toLowerCase() == "index") {
+  if (site.pages[0].url == "/") {
     site.root = site.pages[0]
-    if (!site.title)
-      site.title = site.root.title
+    if (site.root.header.site_title) {
+      site.__proto__.title = site.root.header.site_title
+    } else if (!site.title) {
+      site.__proto__.title = site.root.title
+    }
   }
 
   for (let p of site.pages) {
