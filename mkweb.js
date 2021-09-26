@@ -3,6 +3,7 @@ const fs = require("fs")
 const fsp = require("fs").promises
 const Path = require("path")
 const vm = require("vm")
+const inspect = require("util").inspect
 const glob = require("miniglob").glob
 const md = require("markdown-wasm")
 // const hljs = require('highlight.js/lib/core')
@@ -13,10 +14,21 @@ const template_cache = new Map()
 const buf_lf_dash_x3 = Buffer.from("\n---")
 const self_mtime = fs.statSync(__filename).mtimeMs
 
+const dirname = Path.dirname
+const basename = Path.basename
+const pathresolve = Path.resolve
+const pathjoin = Path.join
+const relpath = Path.relative
+const extname = Path.extname
+const fmtjson = JSON.stringify.bind(JSON)
+
 let VERBOSE = false
 let OPTIMIZE = false
 let DEPS = Symbol("DEPS")
+let DEPFILES = Symbol("DEPFILES")
 let ERRCOUNT = Symbol("ERRCOUNT")
+let BODY_LINE_OFFSET = Symbol("")
+let DYNAMIC_FILES = Symbol("")
 
 const KIND_PAGE = "page"
 const KIND_CSS  = "css"
@@ -31,7 +43,7 @@ function log_important() {
 }
 
 function die(msg) {
-  console.error(`${Path.basename(__filename)}: ${msg}`)
+  console.error(`${basename(__filename)}: ${msg}`)
   process.exit(1)
 }
 
@@ -40,7 +52,10 @@ function create_site_object() { return {
   srcdir: ".",
   outdir: "_site",
   pages: [],
-  defaultTemplate: "template.html",
+  root: null, // root "index" page
+  defaultTemplate: "_template.html",
+  title: "",
+  baseURL: "/",
   buildHash: Date.now().toString(36),
   fileTypes: { // lower(filename_ext) => type
     ".md": "md",
@@ -80,7 +95,7 @@ function create_site_object() { return {
     mtime,
     // readfile(path :string, encoding :string = "utf8") :string
     readfile(path, encoding) {
-      path = Path.resolve(Path.dirname(this.page.srcfile), path)
+      path = pathresolve(dirname(this.page.srcfile), path)
       return fs.readFileSync(path, {encoding: encoding === undefined ? "utf8" : encoding})
     },
     // include(path :string, encoding :string = "utf8") :string
@@ -89,7 +104,7 @@ function create_site_object() { return {
     },
     // cacheBustFileURL(filename :string) :string -- e.g. "foo.css" -> "foo.css?g0zr0dbgtw"
     cacheBustFileURL(path) {
-      const filename = Path.join(Path.dirname(this.page.srcfile), path)
+      const filename = pathjoin(dirname(this.page.srcfile), path)
       const mtime = mtime_with_deps(this.site, filename)
       return path + "?" + Math.round(mtime).toString(36)
     },
@@ -98,29 +113,37 @@ function create_site_object() { return {
     renderMarkdown: render_markdown,
     url(destination) {
       let dstpath = ""
-      if (typeof destination == "object" && destination.srcfile) {
+      if (destination && typeof destination == "object" && destination.srcfile) {
         // page object
         dstpath = destination.srcfile
         if (destination.srctype == "md") {
           dstpath = dstpath.substr(0, dstpath.lastIndexOf(".")) + ".html"
         }
       } else {
-        dstpath = Path.resolve(this.site.srcdir, destination)
+        dstpath = pathresolve(this.site.srcdir, destination ? String(destination) : "")
       }
-      dstpath = Path.relative(Path.dirname(this.page.srcfile), dstpath)
+      dstpath = relpath(dirname(this.page.srcfile), dstpath)
       return dstpath
     },
-    basename: Path.basename,
-    dirname: Path.dirname,
+    basename: basename,
+    dirname: dirname,
+    relpath: relpath,
+    cwd() { return process.cwd() },
 
     // print(...args :any[]) -- write to template output buffer
     print(...args) {} // implemented in render_template
 
   }, // END templateHelpers
 
+  // optional callbacks (can return a Promise to cause build process to wait)
+  onBeforeBuild(files) {}, // called when site.pages has been populated
+  onAfterBuild(files) {},  // called after site has been generated
+
   // internal state
   [ERRCOUNT]: 0,
-  [DEPS]: new Map(), // dependency mappings, used in watch mode
+  [DEPS]: new Map(),          // dependency mappings, used in watch mode
+  [DEPFILES]: new Set(),      // values of DEPS
+  [DYNAMIC_FILES]: new Map(), // used in watch mode
 }}
 
 
@@ -135,6 +158,7 @@ async function main(argv) {
     [["http"],         "addr", `In watch mode, bind to HTTP addr`, "localhost:3000"],
     [["incr"],         "true", `Incrementally build into existing outdir`],
     [["opt", "O"],     "true", `Produce compact output at the expense of time`],
+    [["config"],       "file", `JS file to load as module & call with site state`],
   ])
   VERBOSE = opt.verbose
   OPTIMIZE = opt.opt
@@ -149,12 +173,31 @@ async function main(argv) {
   }
 
   // source and output directories
-  site.srcdir = Path.resolve(site.srcdir)
-  site.outdir = Path.resolve(site.srcdir, opt.outdir)
+  site.srcdir = pathresolve(site.srcdir)
+  site.outdir = pathresolve(site.srcdir, opt.outdir)
   mtime(site.srcdir) > 0 || die(`srcdir "${site.srcdir}" not found`)
   site.srcdir != site.outdir || die(`srcdir is same as outdir ("${site.srcdir}")`)
   site.srcdir.startsWith(site.outdir) && die(`srcdir is inside outdir ("${site.srcdir}")`)
-  site.defaultTemplate = Path.resolve(site.srcdir, site.defaultTemplate)
+  site.defaultTemplate = pathresolve(site.srcdir, site.defaultTemplate)
+
+  // config file
+  if (opt.config) {
+    if (!isfile(opt.config))
+      die(`config file ${opt.config} not found`)
+    const f = require(pathresolve(opt.config))
+    if (typeof f != "function")
+      die(`JS config does not export a function (found ${typeof f})`)
+    f({
+      site,
+      hljs,
+      markdown: md,
+      glob,
+    })
+  }
+
+  // check
+  if (!site.baseURL || !site.baseURL.endsWith("/"))
+    die(`site.baseURL "${site.baseURL}" does not end with "/"`)
 
   // log info
   if (VERBOSE) {
@@ -224,7 +267,7 @@ function cli_parseopt(args, options) {
 function cli_usage(options) {
   let usage = `
     Build a website.
-    usage: ${Path.basename(__filename)} [options] [<srcdir>]
+    usage: ${basename(__filename)} [options] [<srcdir>]
     <srcdir> defaults to the current directory.
     options:
   `.replace(/\n    /gm, "\n").trim()
@@ -245,7 +288,7 @@ function cli_usage(options) {
       usage += `\n  ${args}`
     }
     if (defaultval !== undefined)
-      usage += ` (default ${JSON.stringify(defaultval)})`
+      usage += ` (default ${fmtjson(defaultval)})`
   }
   process.stderr.write(usage + "\n")
 }
@@ -265,14 +308,17 @@ function watch_serve_and_rebuild(site, bindaddr) {
   if (!host)
     host = "localhost"
   const http_server = createServer({ pubdir: site.outdir, host, port, quiet: true })
-  const outdir_rel = Path.relative(site.srcdir, Path.resolve(site.outdir)) + "/"
+  const outdir_rel = relpath(site.srcdir, pathresolve(site.outdir)) + "/"
   let rebuild_timer = null
   const fswatcher = fs.watch(site.srcdir, { recursive: true }, (event, filename) => {
     // ignore changes in outdir
     if (!filename.startsWith(outdir_rel)) {
-      const name = Path.basename(filename)
-      const path = Path.resolve(site.srcdir, filename)
-      if (!site.ignoreFilter(name, path)) {
+      const name = basename(filename)
+      const path = pathresolve(site.srcdir, filename)
+      if (!site.ignoreFilter(name, path) ||
+          site[DEPFILES].has(path) ||
+          template_cache.has(path) )
+      {
         // wait a bit in case many files changed
         log(event, filename)
         clearTimeout(rebuild_timer)
@@ -289,17 +335,18 @@ async function build_site(site) {
   console.time("build site")
   // clear templates cache on each rebuild in case any changed
   template_cache.clear()
+  site[DEPFILES] = new Set()
 
   // find source files
-  const special_files = {} // keyed by KIND_*
+  const specialFiles = {} // keyed by KIND_*
   const add_special_file = (kind, filename) => {
-    if (special_files[kind] === undefined) {
-      special_files[kind] = [filename]
+    if (specialFiles[kind] === undefined) {
+      specialFiles[kind] = [filename]
     } else {
-      special_files[kind].push(filename)
+      specialFiles[kind].push(filename)
     }
   }
-  const datafiles = await find_files(site.srcdir, ent => {
+  const dataFiles = await find_files(site.srcdir, ent => {
     if (site.ignoreFilter(ent.name, ent.path))
       return false
     if (ent.path == site.defaultTemplate || ent.path == site.outdir)
@@ -307,7 +354,7 @@ async function build_site(site) {
     if (ent.isFile()) {
       // check if the file is of a special kind (page, css, etc.)
       // e.g. foo.mDown -> .mdown -> md -> KIND_PAGE
-      const kind = site.fileKinds[site.fileTypes[Path.extname(ent.name).toLowerCase()]]
+      const kind = site.fileKinds[site.fileTypes[extname(ent.name).toLowerCase()]]
       if (kind && kind != KIND_DATA) {
         add_special_file(kind, ent.path)
         return false
@@ -317,13 +364,84 @@ async function build_site(site) {
   })
 
   // load pages
-  site.pages = await Promise.all((special_files[KIND_PAGE] || []).map(fn =>
+  site.pages = await Promise.all((specialFiles[KIND_PAGE] || []).map(fn =>
     load_page(site, fn) ))
 
+  // connect parent & child info
+  connect_pages(site)
+
+  // set default site title
+  if (!site.title)
+    site.title = basename(site.srcdir)
+
+  if (site.onBeforeBuild) {
+    const p = site.onBeforeBuild({dataFiles, specialFiles})
+    if (p instanceof Promise)
+      await p
+  }
+
   // generate site
-  await gen_site(site, datafiles, special_files[KIND_CSS] || [])
+  await gen_site(site, dataFiles, specialFiles[KIND_CSS] || [])
+
+  if (site.onAfterBuild) {
+    const p = site.onAfterBuild({dataFiles, specialFiles})
+    if (p instanceof Promise)
+      await p
+  }
 
   console.timeEnd("build site")
+}
+
+
+function connect_pages(site) {
+  if (site.pages.length == 0)
+    return
+
+  // sort on srcfile where "index" basename takes precedence
+  site.pages.sort((a, b) => {
+    const adir = dirname(a.srcfile)
+    const bdir = dirname(b.srcfile)
+    if (adir != bdir)
+      return adir < bdir ? -1 : 1
+    // "index" takes precedence
+    const aname = path_without_ext(a.srcfile.substr(adir.length + 1))
+    const bname = path_without_ext(b.srcfile.substr(adir.length + 1))
+    return (
+      aname == "index" ? -1 : bname == "index" ? 1 :
+      aname < bname ? -1 : 1
+    )
+  })
+
+  let parent = null
+  let parentStack = []
+  let pdir = ""
+
+  if (path_without_ext(basename(site.pages[0].srcfile)).toLowerCase() == "index") {
+    site.root = site.pages[0]
+    if (!site.title)
+      site.title = site.root.title
+  }
+
+  for (let p of site.pages) {
+    p.parent = parent
+    const dir = dirname(p.srcfile)
+    if (dir == pdir) {
+      parent.children.push(p)
+    } else {
+      if ((pdir + Path.sep).startsWith(dir)) {
+        // leave
+        parent = parentStack.pop()
+      } else {
+        // enter
+        if (parent) {
+          parent.children.push(p)
+          parentStack.push(parent)
+        }
+        parent = p
+      }
+      pdir = dir
+    }
+  }
 }
 
 
@@ -336,51 +454,125 @@ async function gen_site(site, datafiles, cssfiles) {
 }
 
 
+function Page() {}
+
+
 async function load_page(site, srcfile) {
   // load markdown source
   const [srcbuf, srcmtime] = await Promise.all([
     fsp.readFile(srcfile),
     fsp.stat(srcfile).then(st => st.mtimeMs) ])
 
-  const fileext = Path.extname(srcfile)
+  const fileext = extname(srcfile)
   const srctype = site.fileTypes[fileext.toLowerCase()]
 
-  const page = {
-    meta:     {},
+  let url = site.baseURL + relpath(site.srcdir, srcfile)
+  if (srctype != "html")
+    url = url.substr(0, url.length - fileext.length) + ".html"
+  if (basename(url).toLowerCase() == "index.html")
+    url = url.substr(0, url.length - ("index.html").length)
+
+  const page = { __proto__: Page.prototype,
     srcfile:  srcfile,
     srctype:  srctype,
     srcmtime: srcmtime,
     srcbuf:   srcbuf,
+    title:    "",
+    url:      url,
+    header:   {},
+    template: "",
+    body:     "",
+    parent:   null,
+    children: [],
+
+    [inspect.custom](depth, options) {
+      const p = Object.assign(Object.create(page.__proto__), page)
+      delete p.body    // unreliable during template evaluation
+      if (p.srcbuf) p.srcbuf = {
+        // reused across MD pages; when printing children it would show same content
+        [inspect.custom](depth, options) { return `<Buffer>` }
+      }
+      if (p.parent) p.parent = {
+        [inspect.custom](depth, options) {
+          return `<Page ${fmtjson(page.parent.url)}>`
+        }
+      }
+      delete p[inspect.custom]
+      delete p[BODY_LINE_OFFSET]
+      return p
+    }
   }
 
   // parse header aka "frontmatter"
-  const { header, bodyindex } = parse_md_header(srcbuf, srcfile)
+  const { header, bodyindex, linecount } = parse_md_header(srcbuf, srcfile)
   if (bodyindex > 0) {
     page.srcbuf = srcbuf.subarray(bodyindex) // skip header
-    page.meta = Object.assign(page.meta, header)
-    page.template = header.template || site.defaultTemplate
+    page.header = Object.assign(page.header, header)
+    page.template = select_page_template(site, page)
     page.title = header.title
+    page[BODY_LINE_OFFSET] = linecount
   } else if (srctype != "html") {
     // markdown and etc files without a front matter should always use a template
     page.template = site.defaultTemplate
   }
 
+  if (!page.title)
+    page.title = basename(path_without_ext(url).replace(/\/+$/, "")) || url
+
   return page
+}
+
+
+function select_page_template(site, page) {
+  const template = page.header.template
+
+  if (!template)
+    return site.defaultTemplate
+
+  const tryfiles = [
+    ( template.indexOf(Path.sep) == -1 ? "_" + template :
+      dirname(template) + "/_" + basename(template) ) + ".html",
+    template + ".html",
+    template,
+  ]
+
+  for (let fn of tryfiles) {
+    fn = pathresolve(site.srcdir, fn)
+    if (isfile(fn))
+      return fn
+  }
+
+  log_important(
+    `error: ${nicepath(page.srcfile)}:` +
+    ` template file ${fmtjson(template)}` +
+    ` not found in ${fmtjson(site.srcdir)}.` +
+    ` (Tried ${tryfiles.join(", ")})` +
+    ` Falling back to default template.`)
+
+  return site.defaultTemplate
 }
 
 
 async function gen_page(site, page) {
   // build output filename
   const outfile = outfilename(site, page.srcfile, ".html")
-  const outfilemtime = mtime(outfile)
 
   // skip generating outfile if it's up to date
-  if (page.srcmtime < outfilemtime && self_mtime < outfilemtime) {
-    // also check its template
-    const tplfilemtime = page.template ? mtime(page.template) : 0
-    if (tplfilemtime < outfilemtime)
-      return
+  const isDynamic = site[DYNAMIC_FILES].has(page.srcfile)
+  if (!isDynamic) {
+    const outfilemtime = mtime(outfile)
+    if (page.srcmtime < outfilemtime && self_mtime < outfilemtime) {
+      // also check its template
+      const tplfilemtime = page.template ? mtime(page.template) : 0
+      if (tplfilemtime < outfilemtime) {
+        page.srcbuf = null // release memory
+        return
+      }
+    }
   }
+
+  // reset
+  site[DYNAMIC_FILES].set(page.srcfile, false)
 
   // render HTML
   const renderer = site.pageRenderers[page.srctype]
@@ -388,16 +580,6 @@ async function gen_page(site, page) {
   if (renderer) {
     html = renderer(site, page)
     if (page.template) {
-      // if there's no title, ...
-      if (!page.title) {
-        // try to find a header tag
-        let m = /<h1>(.+)<\/h1>/im.exec(html) || /<h2>(.+)<\/h2>/im.exec(html)
-        if (m)
-          page.title = html_to_plain_text(m[1]).trim()
-        // fall back to base of filename without file extension
-        if (!page.title)
-          page.title = Path.basename(page.srcfile, Path.extname(page.srcfile))
-      }
       page.body = html
       const template_body = get_template(page.template)
       html = render_template(site, page, template_body, {
@@ -409,8 +591,23 @@ async function gen_page(site, page) {
     html = page.srcbuf.toString("utf8")
   }
 
+  page.srcbuf = null // release memory
+
   log(`${nicepath(page.srcfile)} -> ${nicepath(outfile)}`)
   return write_file(outfile, html)
+}
+
+
+function title_from_filename(filename) {
+  let name = basename(filename, extname(filename))
+  if (name.toLowerCase() == "index") {
+    const dir = dirname(pathresolve(filename))
+    if (dir == process.cwd()) {
+      return ""
+    }
+    name = basename(dir)
+  }
+  return name.replace("_", " ")
 }
 
 
@@ -453,6 +650,7 @@ function render_template(site, page, source, params) {
   //   return fn.call(page, ...args)
   // }
   const vmctx = {
+    __proto__: page, // allow referencing page props directly
     site,
     page,
   }
@@ -462,21 +660,41 @@ function render_template(site, page, source, params) {
   }
   vm.createContext(vmctx)
 
-  return source.replace(/(\\?|)\{\{(\!)?(.+?)\}\}/gsm, (m, pre, bang, jsexpr, srcoffset) => {
+  const lineoffs = page[BODY_LINE_OFFSET] || 0
+  let isDynamic = false
+
+  const re = /(\\?|)\{\{(\!)?(.+?)\}\}/gsm
+  const output = source.replace(re, (m, pre, bang, jsexpr, srcoffset) => {
     if (pre) {
       // skip escape'd block, e.g. "\{{...}}"
       return m.substr(1)
     }
+    isDynamic = true
     let outbuf = []
     vmctx.print = function(...args) { outbuf.push(...args) }
-    let value = vm_eval(vmctx, jsexpr, params.filename, source, srcoffset + 2)
-    let result = value === undefined ? "" : String(value)
+    let value = vm_eval(vmctx, jsexpr, params.filename, source, srcoffset + 2, lineoffs)
+    switch (typeof value) {
+      case "object":
+        value = value === null ? "null" : inspect(value, {
+          breakLength: 80,
+          maxStringLength: 60,
+          depth: 4,
+        })
+        break
+      default:
+        value = value === undefined ? "" : String(value)
+        break
+    }
     if (outbuf.length > 0)
-      result = outbuf.join("") + result
+      value = outbuf.join("") + value
     if (bang || !params.escape)
-      return result; // raw
-    return params.escape(result)
+      return value; // raw
+    return params.escape(value)
   })
+
+  site[DYNAMIC_FILES].set(page.srcfile, isDynamic)
+
+  return output
 }
 
 
@@ -536,7 +754,7 @@ async function gen_cssfile(site, srcfile, postcss) {
   }).catch(err => {
     site[ERRCOUNT]++
     if (err.file && err.line !== undefined) {
-      const file = Path.relative(site.srcdir, err.file)
+      const file = relpath(site.srcdir, err.file)
       console.error(`error: ${file}:${err.line}:${err.column}: ${err.reason} (postcss)`)
     } else {
       console.error(`error: (postcss) ${err.stack||err}`)
@@ -554,9 +772,11 @@ async function gen_cssfile(site, srcfile, postcss) {
   const depfiles = []
   for (let msg of result.messages) {
     if (msg.type == "dependency" && msg.plugin == "postcss-import") {
-      depfiles.push(Path.relative(site.srcdir, msg.file))
+      depfiles.push(relpath(site.srcdir, msg.file))
+      site[DEPFILES].add(msg.file)
     }
   }
+
   site[DEPS].set(srcfile, depfiles)
 
   return writepromise
@@ -612,7 +832,7 @@ function mkdirs(...dirnames) {
 
 async function copy_files_to_dir(site, srcfiles, dstdir) {
   const outfiles = srcfiles.map(srcfile => outfilename(site, srcfile))
-  const outdirs = outfiles.map(fn => Path.dirname(fn))
+  const outdirs = outfiles.map(fn => dirname(fn))
   await mkdirs(...outdirs)
   return Promise.all(srcfiles.map((srcfile, i) =>
     copy_file(srcfile, outfiles[i]) ))
@@ -631,9 +851,9 @@ function copy_file(srcfile, dstfile) {
       if (err.code != "ENOENT")
         return reject(wrap_error(err))
       // attempt to create directories and then copyFile again
-      console.error("** try mkdir", Path.dirname(dstfile))
+      console.error("** try mkdir", dirname(dstfile))
       try {
-        fs.mkdirSync(Path.dirname(dstfile), {recursive: true})
+        fs.mkdirSync(dirname(dstfile), {recursive: true})
       } catch (err) {
         return reject(wrap_error(err))
       }
@@ -652,7 +872,7 @@ function find_files(dir, filterfn) { // -> Promise<string[]>
     async function visit_dir(dir) {
       const d = await fsp.opendir(dir, { bufferSize: 128 })
       for await (const ent of d) {
-        ent.path = Path.join(dir, ent.name)
+        ent.path = pathjoin(dir, ent.name)
         if (!filterfn || filterfn(ent)) {
           if (ent.isFile() || ent.isSymbolicLink()) {
             files.push(ent.path)
@@ -679,6 +899,15 @@ function mtime(filename) {
     if (err.code == "ENOENT")
       return 0
     throw err
+  }
+}
+
+
+function isfile(filename) {
+  try {
+    return fs.statSync(filename).isFile()
+  } catch (err) {
+    return false
   }
 }
 
@@ -715,7 +944,7 @@ function html_decode(str) {
 }
 
 
-function vm_eval(vmctx, jsexpr, filename, srctext, srcoffset) {
+function vm_eval(vmctx, jsexpr, filename, srctext, srcoffset, lineoffs) {
   try {
     return vm.runInContext(jsexpr, vmctx, {
       displayErrors: false,
@@ -723,6 +952,7 @@ function vm_eval(vmctx, jsexpr, filename, srctext, srcoffset) {
   } catch (err) {
     // show error
     let pos = find_src_pos(srctext, srcoffset)
+    pos.line += lineoffs
     try {
       vm.runInContext(jsexpr, vmctx, {
         lineOffset: pos.line - 1,
@@ -766,9 +996,11 @@ function parse_md_header(buf, filename) {
     if (bodyindex == -1)
       bodyindex = 0
   }
+  let linecount = 0
   if (starti >= 0 && endi >= 0 && bodyindex > 0) {
     let text = buf.subarray(starti, endi).toString("utf8")
     let lines = text.trim().split(/\s*\n\s*/)
+    linecount = lines.length + 2 // + "---" x 2
     for (let key of lines) {
       let i = key.indexOf(":")
       let value = null
@@ -781,10 +1013,7 @@ function parse_md_header(buf, filename) {
       header[key.toLowerCase()] = value
     }
   }
-  if (!header.title) {
-    header.title = title_from_filename(filename)
-  }
-  return { header, bodyindex }
+  return { header, bodyindex, linecount }
 }
 
 
@@ -811,19 +1040,6 @@ function endof_md_header_line(buf, startindex) {
 }
 
 
-function title_from_filename(filename) {
-  let name = Path.basename(filename, Path.extname(filename))
-  if (name.toLowerCase() == "index") {
-    const dir = Path.dirname(Path.resolve(filename))
-    if (dir == process.cwd()) {
-      return ""
-    }
-    name = Path.basename(dir)
-  }
-  return name.replace("_", " ")
-}
-
-
 async function write_file(filename, body, options) {
   let did_retry = false
   while (1) {
@@ -832,7 +1048,7 @@ async function write_file(filename, body, options) {
     } catch (err) {
       if (!did_retry && err.code == "ENOENT") {
         did_retry = true
-        const dir = Path.dirname(filename)
+        const dir = dirname(filename)
         fs.mkdirSync(dir, {recursive: true})
         continue
       }
@@ -851,20 +1067,20 @@ function wrap_error(err) {
 
 
 function outfilename(site, srcpath, ext) {
-  let relname = Path.relative(site.srcdir, srcpath)
+  let relname = relpath(site.srcdir, srcpath)
   if (ext)
     relname = path_without_ext(relname) + ext
-  return Path.join(site.outdir, relname)
+  return pathjoin(site.outdir, relname)
 }
 
 
 function path_without_ext(filename) {
-  return filename.substr(0, filename.length - Path.extname(filename).length)
+  return filename.substr(0, filename.length - extname(filename).length)
 }
 
 
 function nicepath(path) {
-  return Path.relative(process.cwd(), path) || "."
+  return relpath(process.cwd(), path) || "."
 }
 
 
