@@ -354,8 +354,8 @@ function watch_serve_and_rebuild(site, bindaddr) {
       const name = basename(filename)
       const path = pathresolve(site.srcdir, filename)
       if (include_srcfile(site, name, path) ||
-          site[DEPFILES].has(abspath) ||
-          template_cache.has(abspath))
+          site[DEPFILES].has(path) ||
+          template_cache.has(path))
       {
         // wait a bit in case many files changed
         log(event, filename)
