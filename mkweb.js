@@ -175,15 +175,17 @@ async function main(argv) {
       die(`unexpected extra arguments: ${opt.args.slice(1).join(" ")}`)
   }
 
+  // load config from file
+  site.srcdir = pathresolve(site.srcdir)
+  site.outdir = opt.outdir
+  load_config(site, opt)
+
   // source and output directories
   site.srcdir = pathresolve(site.srcdir)
-  site.outdir = pathresolve(site.srcdir, opt.outdir)
+  site.outdir = pathresolve(site.srcdir, site.outdir)
   mtime(site.srcdir) > 0 || die(`srcdir "${site.srcdir}" not found`)
   site.srcdir != site.outdir || die(`srcdir is same as outdir ("${site.srcdir}")`)
   site.srcdir.startsWith(site.outdir) && die(`srcdir is inside outdir ("${site.srcdir}")`)
-
-  // load config from file
-  load_config(site, opt)
 
   // default template
   configure_default_template(site)
