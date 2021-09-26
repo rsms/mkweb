@@ -14,8 +14,8 @@
     ".gitignore"
   ],
   "scripts": {
-    "build": "mkdir -p dist && esbuild --minify --bundle mkweb.js --platform=node --target=node14 --outfile=dist/mkweb && chmod +x dist/mkweb",
-    "build-dev": "mkdir -p dist && touch dist/mkweb-dev && chmod +x dist/mkweb-dev && esbuild --watch --bundle mkweb.js --platform=node --target=node14 --outfile=dist/mkweb-dev --external:autoprefixer --external:cssnano"
+    "build": "mkdir -p dist && esbuild --minify --keep-names --bundle mkweb.js --platform=node --target=node14 --outfile=dist/mkweb --sourcemap=inline --sources-content=false --external:autoprefixer --external:cssnano && chmod +x dist/mkweb",
+    "build-dev": "mkdir -p dist && touch dist/mkweb-dev && chmod +x dist/mkweb-dev && esbuild --watch --bundle mkweb.js --platform=node --target=node14 --outfile=dist/mkweb-dev --sourcemap=inline --sources-content=false --external:autoprefixer --external:cssnano"
   },
   "author": "Rasmus Andersson <rsms.me>",
   "license": "ISC",
@@ -28,8 +28,10 @@
   },
   "devDependencies": {
     "autoprefixer": "^10.2.6",
-    "cssnano": "^5.0.6",
-    "esbuild": "^0.12.14",
+    "cssnano": "^5.0.6"
+  },
+  "devDependencies": {
+    "esbuild": "^0.13.2",
     "highlight.js": "^11.0.1",
     "markdown-wasm": "^1.2.0",
     "miniglob": "^0.1.2",
