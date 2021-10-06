@@ -185,7 +185,8 @@ async function main(argv) {
   site.outdir = pathresolve(site.srcdir, site.outdir)
   mtime(site.srcdir) > 0 || die(`srcdir "${site.srcdir}" not found`)
   site.srcdir != site.outdir || die(`srcdir is same as outdir ("${site.srcdir}")`)
-  site.srcdir.startsWith(site.outdir) && die(`srcdir is inside outdir ("${site.srcdir}")`)
+  if (site.srcdir == site.outdir || site.srcdir.startsWith(site.outdir + "/"))
+    die(`srcdir ("${site.srcdir}") is inside outdir ("${site.outdir}")`)
 
   // default template
   configure_default_template(site)
