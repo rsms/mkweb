@@ -185,8 +185,6 @@ async function main(argv) {
   site.outdir = pathresolve(site.srcdir, site.outdir)
   mtime(site.srcdir) > 0 || die(`srcdir "${site.srcdir}" not found`)
   site.srcdir != site.outdir || die(`srcdir is same as outdir ("${site.srcdir}")`)
-  if (site.srcdir == site.outdir || site.srcdir.startsWith(site.outdir + "/"))
-    die(`srcdir ("${site.srcdir}") is inside outdir ("${site.outdir}")`)
 
   // default template
   configure_default_template(site)
@@ -203,7 +201,7 @@ async function main(argv) {
 
   // wipe outdir unless this is an incremental build
   if (!opt.incr)
-    fs.rmSync(site.outdir, { recursive: true, force: true })
+    await clear_outdir(site)
 
   // build the site
   await build_site(site)
@@ -213,6 +211,48 @@ async function main(argv) {
     return watch_serve_and_rebuild(site, opt.http)
 
   return site[ERRCOUNT] > 0 ? 1 : 0
+}
+
+
+async function clear_outdir(site) {
+  if (!is_parent_dir(site.outdir, site.srcdir)) {
+    fs.rmSync(site.outdir, { recursive: true, force: true })
+    return
+  }
+  // outdir is a parent directory of srcdir -- proceed with caution
+  let dirents
+  try {
+    dirents = fs.readdirSync(site.outdir)
+  } catch (err) {
+    if (err.code != 'EEXIST') {
+      log("error while cleaning outdir")
+      throw err
+    }
+  }
+  let promises = []
+  for (let fn of dirents) {
+    let path = pathjoin(site.outdir, fn)
+    if (!is_parent_dir(site.srcdir, path)) {
+      log(`rm {outdir}/${fn}`)
+      promises.push(fsp.rm(path, { recursive: true, force: true }))
+    }
+  }
+  await Promise.all(promises)
+}
+
+
+// is_parent_dir returns true if parentdir is a parent of subdir.
+// It assumes both paths are absolute and does not end in "/".
+// e.g. is_parent_dir("/a/b", "/a/b/c") => true
+//      is_parent_dir("/a/b", "/a/b")   => true
+//      is_parent_dir("/a/b", "/a")     => false
+//      is_parent_dir("/a/b", "/a/x")   => false
+//
+// outdir = /Users/rsms/src/rsms.me/rsm
+// srcdir = /Users/rsms/src/rsms.me/rsm/_src
+//
+function is_parent_dir(parentdir, subdir) {
+  return subdir == parentdir || subdir.startsWith(parentdir + "/")
 }
 
 
@@ -335,6 +375,14 @@ function cli_usage(options) {
 }
 
 
+function include_srcfile(site, basename, abspath) {
+  if (abspath == site.srcdir || site.srcdir.startsWith(abspath + "/"))
+    return false
+  let relpath = abspath.substr(site.srcdir.length).toLowerCase()
+  return !site.ignoreFilter(basename.toLowerCase(), relpath)
+}
+
+
 function watch_serve_and_rebuild(site, bindaddr) {
   let [host, portstr] = bindaddr.split(":", 2)
   let port = parseInt(portstr)
@@ -369,12 +417,6 @@ function watch_serve_and_rebuild(site, bindaddr) {
   })
   log_important(`watching ${nicepath(site.srcdir)} and serving site at http://${host}:${port}/`)
   return new Promise(resolve => http_server.once("close", resolve))
-}
-
-
-function include_srcfile(site, basename, abspath) {
-  abspath = abspath.substr(site.srcdir.length).toLowerCase()
-  return !site.ignoreFilter(basename.toLowerCase(), abspath)
 }
 
 
