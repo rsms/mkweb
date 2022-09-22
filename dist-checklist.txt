@@ -2,11 +2,12 @@ Publish a distribution
 
 1. Is git is clean?:   git status
 2. update version:     subl package.json
-3. Build & test:       npm run build && ./dist/mkweb -h
-4. Commit:             git commit -m "v$(node -p 'require("./package.json").version')" package.json
+3. fix package-lock:   npm i
+4. Build & test:       npm run build && ./dist/mkweb -h
+5. Commit:             git commit -m "v$(node -p 'require("./package.json").version')" package*
                        git tag "v$(node -p 'require("./package.json").version')"
-5. Publish on NPM:     npm publish
-6. Push to remote:     git push --tags origin main
+6. Publish on NPM:     npm publish
+7. Push to remote:     git push --tags origin main
 
 Useful things:
 - Check what version is the latest on NPM:
