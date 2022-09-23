@@ -4,10 +4,11 @@ Publish a distribution
 2. update version:     subl package.json
 3. fix package-lock:   npm i
 4. Build & test:       npm run build && ./dist/mkweb -h
-5. Commit:             git commit -m "v$(node -p 'require("./package.json").version')" package*
-                       git tag "v$(node -p 'require("./package.json").version')"
-6. Publish on NPM:     npm publish
-7. Push to remote:     git push --tags origin main
+5. Commit and tag:
+     git commit -m "v$(node -p 'require("./package.json").version')" package*
+     git tag "v$(node -p 'require("./package.json").version')"
+6. Push to remote:     git push --tags origin main
+7. Publish on NPM:     npm publish
 
 Useful things:
 - Check what version is the latest on NPM:
