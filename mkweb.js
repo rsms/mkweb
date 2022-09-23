@@ -29,6 +29,7 @@ let DEPFILES = Symbol("DEPFILES")
 let DYNFILES = Symbol("DYNFILES")
 let CFGFILE = Symbol("CFGFILE")
 let ERRCOUNT = Symbol("ERRCOUNT")
+let ISBUILDING = Symbol("ISBUILDING")
 let BODY_LINE_OFFSET = Symbol("")
 
 const KIND_PAGE = "page"
@@ -80,12 +81,18 @@ function create_site_object() { return {
   // name is the base of the file (no directory), path is "absolute" as if the
   // file system is rooted in site.srcdir. Both name and path is toLowerCase().
   ignoreFilter(name, path) {
-    return path.includes("/.")
-        || path.startsWith("/_")
-        || path == "/node_modules"
-        || path == "/readme.md"
+    return path.startsWith(".") || path.startsWith("_") || path.includes("/.")
+        || path == "node_modules"
+        || path == "readme.md"
         || name == "package.json"
         || name == "package-lock.json"
+  },
+
+  // ignoreWatchFilter is called when a source file changes.
+  // Return true to ignore the change, not causing a rebuild.
+  // Useful when generating source files in onBeforeBuild or onAfterBuild.
+  ignoreWatchFilter(name, path) {
+    return false
   },
 
   // templateHelpers are things available in template's global scope.
@@ -185,6 +192,7 @@ async function main(argv) {
   site.outdir = pathresolve(site.srcdir, site.outdir)
   mtime(site.srcdir) > 0 || die(`srcdir "${site.srcdir}" not found`)
   site.srcdir != site.outdir || die(`srcdir is same as outdir ("${site.srcdir}")`)
+  site.srcdir_inside_outdir = is_parent_dir(site.outdir, site.srcdir)
 
   // default template
   configure_default_template(site)
@@ -215,7 +223,7 @@ async function main(argv) {
 
 
 async function clear_outdir(site) {
-  if (!is_parent_dir(site.outdir, site.srcdir)) {
+  if (!site.srcdir_inside_outdir) {
     fs.rmSync(site.outdir, { recursive: true, force: true })
     return
   }
@@ -297,6 +305,11 @@ function load_config(site, opt) {
     hljs,
     markdown: md,
     glob,
+    mtime,
+    copy_file,
+    write_file,
+    read_file: fsp.readFile,
+    build_site() { return build_site(site) },
   })
 }
 
@@ -378,8 +391,31 @@ function cli_usage(options) {
 function include_srcfile(site, basename, abspath) {
   if (abspath == site.srcdir || site.srcdir.startsWith(abspath + "/"))
     return false
-  let relpath = abspath.substr(site.srcdir.length).toLowerCase()
+  let relpath = abspath.substr(site.srcdir.length + 1).toLowerCase()
   return !site.ignoreFilter(basename.toLowerCase(), relpath)
+}
+
+
+// called when a file changes
+// return true to "react" to the change; rebuild
+function should_react_to_file_change(site, relpath) {
+  const abspath = pathjoin(site.srcdir, relpath)
+  const name = basename(relpath)
+
+  // ignore changes in outdir
+  if (!site.srcdir_inside_outdir && is_parent_dir(site.outdir, abspath))
+    return false
+
+  if (site.ignoreWatchFilter(name.toLowerCase(), relpath.toLowerCase()))
+    return false
+
+  if (include_srcfile(site, name, abspath))
+    return true
+
+  if (site[DEPFILES].has(abspath) || template_cache.has(abspath))
+    return true
+
+  return false
 }
 
 
@@ -397,23 +433,15 @@ function watch_serve_and_rebuild(site, bindaddr) {
   if (!host)
     host = "localhost"
   const http_server = createServer({ pubdir: site.outdir, host, port, quiet: true })
-  const outdir_rel = relpath(site.srcdir, pathresolve(site.outdir)) + "/"
+  const outdir_rel = relpath(site.srcdir, site.outdir) + "/"
   let rebuild_timer = null
   const fswatcher = fs.watch(site.srcdir, { recursive: true }, (event, filename) => {
-    // ignore changes in outdir
-    if (!filename.startsWith(outdir_rel)) {
-      const name = basename(filename)
-      const path = pathresolve(site.srcdir, filename)
-      if (include_srcfile(site, name, path) ||
-          site[DEPFILES].has(path) ||
-          template_cache.has(path))
-      {
-        // wait a bit in case many files changed
-        log(event, filename)
-        clearTimeout(rebuild_timer)
-        rebuild_timer = setTimeout(() => build_site(site), 50)
-      }
-    }
+    if (!should_react_to_file_change(site, filename))
+      return
+    // wait a bit in case many files changed
+    log(event, filename)
+    clearTimeout(rebuild_timer)
+    rebuild_timer = setTimeout(() => build_site(site), 50)
   })
   log_important(`watching ${nicepath(site.srcdir)} and serving site at http://${host}:${port}/`)
   return new Promise(resolve => http_server.once("close", resolve))
@@ -421,6 +449,25 @@ function watch_serve_and_rebuild(site, bindaddr) {
 
 
 async function build_site(site) {
+  // handle calls to build_site while build is in progress
+
+  // wait for ongoing build
+  if (site[ISBUILDING])
+    await site[ISBUILDING]
+
+  // start new build
+  site[ISBUILDING] = build_site1(site).then(result => {
+    site[ISBUILDING] = null
+    return result
+  }).catch(err => {
+    site[ISBUILDING] = null
+    throw err
+  })
+  return await site[ISBUILDING]
+}
+
+
+async function build_site1(site) {
   console.time("build site")
   // clear templates cache on each rebuild in case any changed
   template_cache.clear()
