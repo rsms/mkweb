@@ -1,6 +1,6 @@
 {
   "name": "rsms-mkweb",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Build simple static websites authored in Markdown",
   "main": "mkweb.js",
   "bin": {
