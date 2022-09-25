@@ -169,6 +169,7 @@ async function main(argv) {
     [["incr"],         "true", `Incrementally build into existing outdir`],
     [["opt", "O"],     "true", `Produce compact output at the expense of time`],
     [["config"],       "file", `JS file to load as module & call with site state`],
+    [["baseurl"],      "path", `Override site.baseURL`],
   ])
   VERBOSE = opt.verbose
   OPTIMIZE = opt.opt
@@ -185,6 +186,7 @@ async function main(argv) {
   // load config from file
   site.srcdir = pathresolve(site.srcdir)
   site.outdir = opt.outdir
+  if (opt.baseurl) site.baseURL = opt.baseurl
   load_config(site, opt)
 
   // source and output directories
@@ -194,15 +196,16 @@ async function main(argv) {
   site.srcdir != site.outdir || die(`srcdir is same as outdir ("${site.srcdir}")`)
   site.srcdir_inside_outdir = is_parent_dir(site.outdir, site.srcdir)
 
+  // opt.baseurl overrides config
+  if (opt.baseurl)
+    site.baseURL = opt.baseurl
+
   // default template
   configure_default_template(site)
 
   // check site.baseURL
-  if (opt.watch) {
-    site.baseURL = "/"
-  } else if (!site.baseURL || !site.baseURL.endsWith("/")) {
+  if (!site.baseURL || !site.baseURL.endsWith("/"))
     die(`site.baseURL "${site.baseURL}" does not end with "/"`)
-  }
 
   // log info
   if (VERBOSE) {
