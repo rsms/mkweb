@@ -197,9 +197,12 @@ async function main(argv) {
   // default template
   configure_default_template(site)
 
-  // check
-  if (!site.baseURL || !site.baseURL.endsWith("/"))
+  // check site.baseURL
+  if (opt.watch) {
+    site.baseURL = "/"
+  } else if (!site.baseURL || !site.baseURL.endsWith("/")) {
     die(`site.baseURL "${site.baseURL}" does not end with "/"`)
+  }
 
   // log info
   if (VERBOSE) {
