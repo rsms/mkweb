@@ -58,7 +58,7 @@ function create_site_object() { return {
   root: null, // root "index" page
   defaultTemplate: "",
   baseURL: "/",
-  buildHash: Date.now().toString(36),
+  buildHash: Math.round(Math.random()*Number.MAX_SAFE_INTEGER).toString(36),
   fileTypes: { // lower(filename_ext) => type
     ".md": "md",
     ".mdown": "md",
@@ -116,7 +116,7 @@ function create_site_object() { return {
     cacheBustFileURL(path) {
       const filename = pathjoin(dirname(this.page.srcfile), path)
       const mtime = mtime_with_deps(this.site, filename)
-      return path + "?" + Math.round(mtime).toString(36)
+      return path + "?" + (mtime ? Math.round(mtime).toString(36) : this.site.buildHash)
     },
     // renderMarkdown(src :string|ArrayLike<number>) :string -- returns html
     // Example: {{! renderMarkdown(readfile("README.md", null)) }}
