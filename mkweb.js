@@ -309,6 +309,7 @@ function load_config(site, opt) {
     markdown: md,
     glob,
     mtime,
+    cli_opts: opt,
     copy_file,
     write_file,
     read_file: fsp.readFile,
@@ -319,9 +320,9 @@ function load_config(site, opt) {
 
 function cli_parseopt(args, options) {
   let result = {
-    _options: options,
     args: [], // unparsed args
   }
+  Object.defineProperty(result, '_options', { value: options })
   const argmap = {}
   const aliasmap = {}
   for (let [flags, kind, descr, defaultval] of options) {
