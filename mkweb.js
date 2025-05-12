@@ -148,6 +148,8 @@ function create_site_object() { return {
   // optional callbacks (can return a Promise to cause build process to wait)
   onBeforeBuild(files) {}, // called when site.pages has been populated
   onAfterBuild(files) {},  // called after site has been generated
+  onBeforePage(page) {}, // called before a page is written to disk
+  onAfterPage(page) {}, // called after a page is written to disk
 
   // internal state
   [ERRCOUNT]: 0,
@@ -623,6 +625,8 @@ async function load_page(site, srcfile) {
     body:     "",
     parent:   null,
     children: [],
+    html:     "",
+    outfile:  outfilename(site, srcfile, ".html"),
 
     [inspect.custom](depth, options) {
       const p = Object.assign(Object.create(page.__proto__), page)
@@ -693,13 +697,10 @@ function select_page_template(site, page) {
 
 
 async function gen_page(site, page) {
-  // build output filename
-  const outfile = outfilename(site, page.srcfile, ".html")
-
   // skip generating outfile if it's up to date
   const isDynamic = site[DYNFILES].has(page.srcfile)
   if (!isDynamic) {
-    const outfilemtime = mtime(outfile)
+    const outfilemtime = mtime(page.outfile)
     if (page.srcmtime < outfilemtime && self_mtime < outfilemtime) {
       // also check its template
       const tplfilemtime = page.template ? mtime(page.template) : 0
@@ -730,10 +731,26 @@ async function gen_page(site, page) {
     html = page.srcbuf.toString("utf8")
   }
 
-  page.srcbuf = null // release memory
+  page.html = html;
 
-  log(`${nicepath(page.srcfile)} -> ${nicepath(outfile)}`)
-  return write_file(outfile, html)
+  if (site.onBeforePage) {
+    const p = site.onBeforePage(page)
+    if (p instanceof Promise)
+      await p
+  }
+
+  log(`${nicepath(page.srcfile)} -> ${nicepath(page.outfile)}`)
+  const result = write_file(page.outfile, page.html)
+
+  if (site.onAfterPage) {
+    const p = site.onAfterPage(page)
+    if (p instanceof Promise)
+      await p
+  }
+
+  page.srcbuf = null // release memory
+  page.html = null;
+  return result;
 }
 
 
