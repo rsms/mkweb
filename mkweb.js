@@ -498,7 +498,7 @@ async function build_site1(site) {
       return false
     if (ent.path == site.defaultTemplate || ent.path == site.outdir)
       return false
-    if (ent.isFile()) {
+    if (ent.isFile) {
       // check if the file is of a special kind (page, css, etc.)
       // e.g. foo.mDown -> .mdown -> md -> KIND_PAGE
       const kind = site.fileKinds[site.fileTypes[extname(ent.name).toLowerCase()]]
@@ -999,24 +999,36 @@ function copy_file(srcfile, dstfile) {
   return new Promise((resolve, reject) => {
     if (mtime(srcfile) < mtime(dstfile))
       return resolve()
+
     log(`${nicepath(srcfile)} -> ${nicepath(dstfile)}`)
-    const fl = fs.constants.COPYFILE_FICLONE  // copy-on-write if FS supports it
-    return fs.copyFile(srcfile, dstfile, fl, err => {
+    let fl = fs.constants.COPYFILE_FICLONE  // copy-on-write if FS supports it
+
+    const inner = err => {
       if (!err)
         return resolve()
+
+      if (err.code == "ENOTSUP" && fl == fs.constants.COPYFILE_FICLONE) {
+        fl = 0
+        return fs.copyFile(srcfile, dstfile, fl, inner)
+      }
+
       if (err.code != "ENOENT")
         return reject(wrap_error(err))
+
       // attempt to create directories and then copyFile again
-      console.error("** try mkdir", dirname(dstfile))
+      log(`mkdir ${nicepath(dirname(dstfile))}`)
       try {
         fs.mkdirSync(dirname(dstfile), {recursive: true})
       } catch (err) {
         return reject(wrap_error(err))
       }
+
       fs.copyFile(srcfile, dstfile, fl, err => {
         err ? reject(wrap_error(err)) : resolve()
       })
-    })
+    }
+
+    return fs.copyFile(srcfile, dstfile, fl, inner)
   })
 }
 
@@ -1029,10 +1041,22 @@ function find_files(dir, filterfn) { // -> Promise<string[]>
       const d = await fsp.opendir(dir, { bufferSize: 128 })
       for await (const ent of d) {
         ent.path = pathjoin(dir, ent.name)
+
+        let isFile = ent.isFile()
+        let isDir = ent.isDirectory()
+        if (ent.isSymbolicLink()) {
+          const st = fs.statSync(ent.path)
+          isFile = st.isFile()
+          isDir = st.isDirectory()
+        }
+        ent.isFile = isFile
+        ent.isDir = isDir
+        ent.isDirectory = isDir
+
         if (!filterfn || filterfn(ent)) {
-          if (ent.isFile() || ent.isSymbolicLink()) {
+          if (ent.isFile) {
             files.push(ent.path)
-          } else if (ent.isDirectory()) {
+          } else if (ent.isDir) {
             nactive++
             visit_dir(ent.path, filterfn)
           }
