@@ -1187,6 +1187,9 @@ function parse_md_header(buf, filename) {
       if (i >= 0) {
         value = key.substr(i + 1).trim()
         key   = key.substr(0, i).trim()
+        if (value[0] == '"' && value[value.length - 1] == '"') {
+          value = value.substring(1, value.length - 1).replace(/\\/g, "")
+        }
       } else {
         key = key.trim()
       }
