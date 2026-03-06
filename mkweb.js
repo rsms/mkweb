@@ -76,6 +76,7 @@ function create_site_object() { return {
     "md": render_page_md,
     "html": render_page_html,
   },
+  renderPage: render_page,
 
   // ignoreFilter returns true for files that should be excluded from output.
   // name is the base of the file (no directory), path is "absolute" as if the
@@ -787,6 +788,14 @@ function render_page_html(site, page) {
   return render_template(site, page, page.srcbuf.toString("utf8"), {
     filename: page.srcfile,
     escape: html_encode,
+  })
+}
+
+
+function render_page(site, page, filename, escape) {
+  return render_template(site, page, page.srcbuf.toString("utf8"), {
+    filename: filename === undefined ? page.srcfile : filename,
+    escape,
   })
 }
 
