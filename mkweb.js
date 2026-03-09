@@ -648,13 +648,13 @@ async function load_page(site, srcfile) {
   }
 
   // parse header aka "frontmatter"
-  const { header, bodyindex, linecount } = parse_md_header(srcbuf, srcfile)
-  if (bodyindex > 0) {
-    page.srcbuf = srcbuf.subarray(bodyindex) // skip header
+  const { header, bodyIndex, bodyLineOffset } = parse_md_header(srcbuf, srcfile)
+  if (bodyIndex > 0) {
+    page.srcbuf = srcbuf.subarray(bodyIndex) // skip header
     page.header = Object.assign(page.header, header)
     page.template = select_page_template(site, page)
     page.title = header.title
-    page[BODY_LINE_OFFSET] = linecount
+    page[BODY_LINE_OFFSET] = bodyLineOffset
   } else if (srctype != "html") {
     // markdown and etc files without a front matter should always use a template
     page.template = site.defaultTemplate
@@ -1173,39 +1173,96 @@ function find_src_pos(text, offset) {
 }
 
 
+function parseFrontmatter(yaml, filename) {
+  const lines = yaml.split(/\r?\n/)
+  const data = {}
+  let i = 0
+
+  while (i < lines.length) {
+    let line = lines[i]
+    i++
+
+    if (!line.trim() || /^\s*#/.test(line))
+      continue
+
+    if (/^\s/.test(line))
+      throw new Error(`${filename}: Unsupported frontmatter indentation: ${JSON.stringify(line)}`)
+
+    const m = /^([A-Za-z0-9_-]+):(.*)$/.exec(line)
+    if (!m)
+      throw new Error(`${filename}: Invalid YAML in frontmatter: ${JSON.stringify(line)}`)
+
+    const key = m[1]
+    const rest = m[2].trim()
+    let value
+
+    if (rest === "") {
+      const arr = []
+      while (i < lines.length) {
+        const next = lines[i]
+
+        if (!next.trim() || /^\s*#/.test(next)) {
+          i++
+          continue
+        }
+
+        const m2 = /^\s*-\s+(.*)$/.exec(next)
+        if (!m2)
+          break
+
+        arr.push(parseFrontmatterScalar(m2[1]))
+        i++
+      }
+      value = arr
+    } else {
+      value = parseFrontmatterScalar(rest)
+    }
+
+    data[key] = value
+    data[key.toLowerCase()] = value
+  }
+
+  return { data, lines }
+}
+
+function parseFrontmatterScalar(s) {
+  s = s.trim()
+  if ((s.startsWith('"') && s.endsWith('"')) || (s.startsWith("'") && s.endsWith("'")))
+    return s.slice(1, -1)
+  if (s === 'true')
+    return true
+  if (s === 'false')
+    return false
+  if (s === 'null')
+    return null
+  if (/^-?\d+$/.test(s))
+    return Number(s)
+  if (/^-?\d+\.\d+$/.test(s))
+    return Number(s)
+  return s
+}
+
+
 function parse_md_header(buf, filename) {
   let header = {}
   if (!(buf instanceof Buffer))
     buf = Buffer.from(buf)
   let starti = endof_md_header_line(buf)
   let endi = buf.indexOf(buf_lf_dash_x3, starti)
-  let bodyindex = 0
+  let bodyIndex = 0
   if (endi >= 0) {
-    bodyindex = endof_md_header_line(buf, endi + 1)
-    if (bodyindex == -1)
-      bodyindex = 0
+    bodyIndex = endof_md_header_line(buf, endi + 1)
+    if (bodyIndex == -1)
+      bodyIndex = 0
   }
-  let linecount = 0
-  if (starti >= 0 && endi >= 0 && bodyindex > 0) {
-    let text = buf.subarray(starti, endi).toString("utf8")
-    let lines = text.trim().split(/\s*\n\s*/)
-    linecount = lines.length + 2 // + "---" x 2
-    for (let key of lines) {
-      let i = key.indexOf(":")
-      let value = null
-      if (i >= 0) {
-        value = key.substr(i + 1).trim()
-        key   = key.substr(0, i).trim()
-        if (value[0] == '"' && value[value.length - 1] == '"') {
-          value = value.substring(1, value.length - 1).replace(/\\/g, "")
-        }
-      } else {
-        key = key.trim()
-      }
-      header[key.toLowerCase()] = value
-    }
+  let bodyLineOffset = 0
+  if (starti >= 0 && endi >= 0 && bodyIndex > 0) {
+    let yaml = buf.subarray(starti, endi).toString("utf8")
+    frontmatter = parseFrontmatter(yaml, filename)
+    header = frontmatter.data
+    bodyLineOffset = frontmatter.lines.length
   }
-  return { header, bodyindex, linecount }
+  return { header, bodyIndex, bodyLineOffset }
 }
 
 
