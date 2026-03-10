@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+#!/usr/bin/env node --enable-source-maps
 const fs = require("fs")
 const fsp = require("fs").promises
 const Path = require("path")
