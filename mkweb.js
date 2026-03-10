@@ -545,44 +545,48 @@ function connect_pages(site) {
   if (site.pages.length == 0)
     return
 
-  site.pages.sort((a, b) => {
-    const aurl = path_without_ext(a.url).replace(/\/+$/, "")
-    const burl = path_without_ext(b.url).replace(/\/+$/, "")
-    return aurl < burl ? -1 : burl < aurl ? 1 : 0
-  })
+  for (let page of site.pages)
+    page.id = path_without_ext(page.url).replace(/\/+$/, "")
+
+  site.pages.sort((a, b) => a.id < b.id ? -1 : b.id < a.id ? 1 : 0)
+
+  site.root = site.pages[0]
+  if (site.root.header.site_title) {
+    site.__proto__.title = site.root.header.site_title
+  } else if (!site.title) {
+    site.__proto__.title = site.root.title
+  }
 
   let parent = null
   let parentStack = []
-  let pdir = ""
 
-  if (site.pages[0].url == "/") {
-    site.root = site.pages[0]
-    if (site.root.header.site_title) {
-      site.__proto__.title = site.root.header.site_title
-    } else if (!site.title) {
-      site.__proto__.title = site.root.title
-    }
-  }
+  for (let page of site.pages) {
+    // console.log(page.id)
+    page.parent = parent
 
-  for (let p of site.pages) {
-    p.parent = parent
-    const dir = dirname(p.srcfile)
-    if (dir == pdir) {
-      parent.children.push(p)
+    if (!parent) {
+      // console.log("  no parent")
     } else {
-      if ((pdir + Path.sep).startsWith(dir)) {
-        // leave
-        parent = parentStack.pop()
+      const parentPath = parent.id + "/"
+      // console.log(`  consider parent "${parent.id}"`)
+      if (page.id.startsWith(parentPath)) {
+        // e.g. page.id="/a/b/c", parentPath="/a/b/"
+        // console.log(`  child of "${parent.id}" (1)`)
+        parent.children.push(page)
       } else {
-        // enter
-        if (parent) {
-          parent.children.push(p)
-          parentStack.push(parent)
+        while ((parent = parentStack.pop())) {
+          const parentPath = parent.id + "/"
+          // console.log(`  consider parent "${parent.id}"`)
+          if (page.id.startsWith(parentPath)) {
+            // console.log(`  child of "${parent.id}" (2)`)
+            parent.children.push(page)
+            break
+          }
         }
-        parent = p
       }
-      pdir = dir
     }
+    parentStack.push(parent)
+    parent = page
   }
 }
 
