@@ -603,6 +603,31 @@ async function gen_site(site, datafiles, cssfiles) {
 function Page() {}
 
 
+function infer_page_title(site, page) {
+  // infer missing title from H1
+  if (page.srcbuf.length > 0 && typeof(page.header.title) != "string") {
+    const textEncoder = new TextDecoder()
+    for (let end = 100; end <= page.srcbuf.length; end++) {
+      try {
+        const text = textEncoder.decode(page.srcbuf.subarray(0, end))
+        if (page.srctype == 'md') {
+          const m = /^#\s+(.+)$/m.exec(text)
+          const title = m ? m[1].trim() : ""
+          if (title) {
+            page.title = title
+            return
+          }
+        }
+        break
+      } catch (_) {}
+    }
+  }
+
+  // fall back to basename of url
+  page.title = basename(path_without_ext(page.url).replace(/\/+$/, "")) || page.url
+}
+
+
 async function load_page(site, srcfile) {
   // load markdown source
   const [srcbuf, srcmtime] = await Promise.all([
@@ -665,7 +690,7 @@ async function load_page(site, srcfile) {
   }
 
   if (!page.title)
-    page.title = basename(path_without_ext(url).replace(/\/+$/, "")) || url
+    infer_page_title(site, page)
 
   return page
 }
@@ -1111,7 +1136,7 @@ function mtime_with_deps(site, filename) {
 
 
 function html_encode(str) {
-  return str.replace(/[&<>'"]/g, tag => ({
+  return String(str).replace(/[&<>'"]/g, tag => ({
     '&': '&amp;',
     '<': '&lt;',
     '>': '&gt;',
