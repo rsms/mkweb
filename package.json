@@ -1,6 +1,6 @@
 {
   "name": "rsms-mkweb",
-  "version": "0.2.10",
+  "version": "0.2.11",
   "description": "Build simple static websites authored in Markdown",
   "main": "mkweb.js",
   "bin": {
@@ -36,9 +36,9 @@
     "highlight.js": "^11.2.0",
     "markdown-wasm": "^1.2.0",
     "miniglob": "^0.1.2",
-    "postcss": "^8.3.5",
-    "postcss-import": "^14.0.2",
-    "postcss-nested": "^5.0.5",
+    "postcss": "^8.5.8",
+    "postcss-import": "^14.1.0",
+    "postcss-nested": "^5.0.6",
     "serve-http": "^1.0.6"
   }
 }
