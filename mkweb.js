@@ -149,6 +149,7 @@ function create_site_object() { return {
   // optional callbacks (can return a Promise to cause build process to wait)
   onBeforeBuild(files) {}, // called when site.pages has been populated
   onAfterBuild(files) {},  // called after site has been generated
+  classifyFile(path, kind) {}, // return "data" to copy verbatim, or a kind ("page" or "css")
   onBeforePage(page) {}, // called before a page is written to disk
   onAfterPage(page) {}, // called after a page is written to disk
 
@@ -502,7 +503,18 @@ async function build_site1(site) {
     if (ent.isFile) {
       // check if the file is of a special kind (page, css, etc.)
       // e.g. foo.mDown -> .mdown -> md -> KIND_PAGE
-      const kind = site.fileKinds[site.fileTypes[extname(ent.name).toLowerCase()]]
+      let kind = site.fileKinds[site.fileTypes[extname(ent.name).toLowerCase()]]
+      if (site.classifyFile) {
+        let k = site.classifyFile(ent.path, kind)
+        if (k !== undefined && k !== null) {
+          k = String(k).toLowerCase()
+          if (k == "" || k == "data") {
+            kind = KIND_DATA
+          } else {
+            kind = k
+          }
+        }
+      }
       if (kind && kind != KIND_DATA) {
         add_special_file(kind, ent.path)
         return false
