@@ -496,9 +496,9 @@ async function build_site1(site) {
     }
   }
   const dataFiles = await find_files(site.srcdir, ent => {
-    if (!include_srcfile(site, ent.name, ent.path))
-      return false
     if (ent.path == site.defaultTemplate || ent.path == site.outdir)
+      return false
+    if (!include_srcfile(site, ent.name, ent.path))
       return false
     if (ent.isFile) {
       // check if the file is of a special kind (page, css, etc.)
