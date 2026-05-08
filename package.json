@@ -29,7 +29,7 @@
   },
   "dependencies": {
     "autoprefixer": "^10.5.0",
-    "cssnano": "^8.0.0"
+    "cssnano": "^7.1.9"
   },
   "devDependencies": {
     "esbuild": "^0.25.12",
